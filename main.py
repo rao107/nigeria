@@ -1,10 +1,15 @@
 import numpy as np
-import cv2
+import cv2 as cv
+import pytesseract as pyt
 
 
-img = cv2.imread("./temp/img.jpg")
-# img = cv2.resize(img, (720, 600))
-hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+### PLAN ###
+# 1. Use OpenCV to grab bounding boxes of text automatically
+# 2. Manually select the text boxes it did not detect
+# 3. Pass text to Pytesseract and edit mistakes
+
+img = cv.imread("./img/PXL_20230615_184150415.jpg")
+hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
 
 lo = np.asarray([11, 19, 64])
 hi = np.asarray([105, 66, 255])
@@ -13,60 +18,73 @@ hi = np.asarray([105, 66, 255])
 def nop(x):
   pass
 
+top_left = None
+def draw_rect(event, x, y, flags, param):
+  if event == cv.EVENT_FLAG_LBUTTON:
+    print(x, y)
+    if top_left == None:
+      top_left = (x, y)
+    else:
+      # New bounding box
+      top_left = None
 
-cv2.namedWindow("mask")
-cv2.createTrackbar("H_lo", "mask", lo[0], 255, nop)
-cv2.createTrackbar("S_lo", "mask", lo[1], 255, nop)
-cv2.createTrackbar("V_lo", "mask", lo[2], 255, nop)
-cv2.createTrackbar("H_hi", "mask", hi[0], 255, nop)
-cv2.createTrackbar("S_hi", "mask", hi[1], 255, nop)
-cv2.createTrackbar("V_hi", "mask", hi[2], 255, nop)
+cv.namedWindow("mask")
+cv.createTrackbar("H_lo", "mask", lo[0], 255, nop)
+cv.createTrackbar("S_lo", "mask", lo[1], 255, nop)
+cv.createTrackbar("V_lo", "mask", lo[2], 255, nop)
+cv.createTrackbar("H_hi", "mask", hi[0], 255, nop)
+cv.createTrackbar("S_hi", "mask", hi[1], 255, nop)
+cv.createTrackbar("V_hi", "mask", hi[2], 255, nop)
 
 
+loop = True
 show_boxes = False
+text_boxes = None
 
-while 1:
-  mask = cv2.bitwise_not(cv2.inRange(hsv, lo, hi))
-  # blur =cv2.GaussianBlur(mask, (5, 5), 1)
-  # canny = cv2.Canny(blur, 10, 50)
-  kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-  dilate = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel)
+# Phase 1: Creating bounding boxes
+while loop:
+  mask = cv.bitwise_not(cv.inRange(hsv, lo, hi))
+  kernel = cv.getStructuringElement(cv.MORPH_RECT, (5, 5))
+  dilate = cv.morphologyEx(mask, cv.MORPH_DILATE, kernel)
 
   # get absolute difference between dilate and thresh
-  diff = cv2.absdiff(dilate, mask)
-  # edges = 255 - diff
+  diff = cv.absdiff(dilate, mask)
   edges = diff
 
-  lo[0] = cv2.getTrackbarPos("H_lo", "mask")
-  lo[1] = cv2.getTrackbarPos("S_lo", "mask")
-  lo[2] = cv2.getTrackbarPos("V_lo", "mask")
-  hi[0] = cv2.getTrackbarPos("H_hi", "mask")
-  hi[1] = cv2.getTrackbarPos("S_hi", "mask")
-  hi[2] = cv2.getTrackbarPos("V_hi", "mask")
-  cv2.imshow("mask",cv2.resize( mask, (720, 500)))
-  # cv2.drawContours(roi, rect_cntr, -1, (0, 0, 255), 2)
-  # cv2.imshow("hsv",cv2.resize( hsv, (720, 500)))
-  # cv2.imshow("blur",cv2.resize(blur , (720, 500)))
-  # cv2.imshow("edges",cv2.resize( edges, (720, 500)))
+  lo[0] = cv.getTrackbarPos("H_lo", "mask")
+  lo[1] = cv.getTrackbarPos("S_lo", "mask")
+  lo[2] = cv.getTrackbarPos("V_lo", "mask")
+  hi[0] = cv.getTrackbarPos("H_hi", "mask")
+  hi[1] = cv.getTrackbarPos("S_hi", "mask")
+  hi[2] = cv.getTrackbarPos("V_hi", "mask")
+  cv.imshow("mask", cv.resize(mask, (550, 500)))
 
   if show_boxes:
-    roi = cv2.copyTo(img, mask=img)
-    for i in cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]:
-      eps = 0.05 * cv2.arcLength(i, True)
-      approx = cv2.approxPolyDP(i, eps, True)
-      if len(approx) == 4:
-        bb = cv2.boundingRect(approx)
-        x, y, w, h = bb
-        roi = cv2.rectangle(roi, bb, (0, 0, 255), 5)
+    roi = cv.copyTo(img, mask=img)
+    contours = cv.findContours(edges, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)[0]
+    text_boxes = list(map(lambda box: cv.boundingRect(box), filter(lambda cnt: cv.contourArea(cnt) > 200000, contours)))
+    for box in text_boxes:
+      roi = cv.rectangle(roi, box, (0, 0, 255), 5)
 
-    cv2.imshow("roi",cv2.resize( roi, (720, 500)))
+    cv.imshow("roi", cv.resize(roi, (550, 500)))
+    cv.setMouseCallback("roi", draw_rect)
 
-  key = cv2.waitKey(1) & 0xFF
-  if key == ord("a"):
-    print(lo)
-    print(hi)
+  key = cv.waitKey(1) & 0xFF
   if key == ord('s'):
     show_boxes = not show_boxes
     print(f"Showboxes: {show_boxes}")
-  if 27 == key:
-    break
+  if key == 27: # ESC , 13 == ENTER
+    cv.destroyAllWindows()
+    loop = False
+
+# Phase 2: Extracting text
+imgrgb = cv.cvtColor(img, cv.COLOR_BGR2RGB)
+for box in text_boxes:
+  x, y, w, h = box
+  crop = imgrgb[y:y+h, x:x+w]
+  print(pyt.image_to_string(crop).replace('\n', ' '))
+  while True:
+    cv.imshow('crop', cv.resize(cv.cvtColor(crop, cv.COLOR_RGB2BGR), None, fx=0.5, fy=0.5))
+    key = cv.waitKey(1) & 0xFF
+    if key == 27: # ESC
+      break
