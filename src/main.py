@@ -31,6 +31,12 @@ if not exists(CSV_FOLDER):
 # Directory to go through
 DIR_NAME = './img/house/1983 - 1983/'
 
+# Flag if scan is house or senate
+IS_HOUSE = 'house' in DIR_NAME
+
+# Size of image when displayed
+SCALED_SIZE = (550, 500)  # (x, y)
+
 
 # Function to pass to trackbars
 def nop(x):
@@ -53,14 +59,15 @@ for img_name in sorted(listdir(DIR_NAME)):
 
   # Grab scan
   img = cv.imread(DIR_NAME + img_name)
+  print(len(img), len(img[0]))
 
   if loop:
     # Convert scan to HSV
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
 
     # Range of HSV values for mask
-    lo = np.asarray([11, 19, 64]) if 'house' in DIR_NAME else np.asarray([11, 19, 64])
-    hi = np.asarray([105, 66, 255]) if 'house' in DIR_NAME else np.asarray([105, 66, 255])
+    lo = np.asarray([11, 21, 64]) if IS_HOUSE else np.asarray([11, 21, 64])
+    hi = np.asarray([105, 66, 255]) if IS_HOUSE else np.asarray([105, 66, 255])
 
     # Creating window with trackbars to change `lo` and `hi`
     cv.namedWindow('mask')
@@ -83,7 +90,7 @@ for img_name in sorted(listdir(DIR_NAME)):
 
     # Create and show mask in `mask` window
     mask = cv.bitwise_not(cv.inRange(hsv, lo, hi))
-    cv.imshow('mask', cv.resize(mask, (550, 500)))
+    cv.imshow('mask', cv.resize(mask, SCALED_SIZE))
 
     # Find contours using mask
     kernel = cv.getStructuringElement(cv.MORPH_RECT, (5, 5))
@@ -97,16 +104,56 @@ for img_name in sorted(listdir(DIR_NAME)):
     text_boxes = [cv.boundingRect(cnt) for cnt in big_contours]
     roi = cv.copyTo(img, mask=img)
     for box in text_boxes:
-      roi = cv.rectangle(roi, box, RED, 5)
-    cv.imshow('roi', cv.resize(roi, (550, 500)))
+      roi = cv.rectangle(roi, box, RED if IS_HOUSE else GREEN, 5, cv.LINE_AA)
+    cv.imshow('roi', cv.resize(roi, SCALED_SIZE))
 
     # Check for user input
     key = cv.waitKey(1) & 0xFF
     if key == ESC:
       cv.destroyAllWindows()
+      break
+    elif key == ENTER:
+      cv.destroyAllWindows()
       loop = False
+  
+  # Part 2: Add extra boxes
+  extra_boxes = []
+  if loop:
+    cv.namedWindow('roi')
+    prev = (-1, -1)
+    scalex, scaley = SCALED_SIZE
+    xscaling = len(img[0])/scalex
+    yscaling = len(img)/scaley
+    def mouseCallback(event, x, y, flags, param):
+      global prev
+      if event == cv.EVENT_LBUTTONDOWN:
+        if prev == (-1, -1):
+          prev = (x, y)
+        else:
+          px, py = prev
+          extra_boxes.append((int(px * xscaling), int(py * yscaling), int((x-px) * (len(img[0])/550)), int((y-py) * (len(img)/500))))
+          prev = (-1, -1)
+    cv.setMouseCallback('roi', mouseCallback)
 
-  # Save bounding boxes of text
+  while loop:
+    roi = cv.copyTo(img, mask=img)
+
+    for box in text_boxes:
+      roi = cv.rectangle(roi, box, RED if IS_HOUSE else GREEN, 5, cv.LINE_AA)
+
+    for box in extra_boxes:
+      roi = cv.rectangle(roi, box, BLUE, 15, cv.LINE_AA)
+
+    cv.imshow('roi', cv.resize(roi, SCALED_SIZE))
+
+    # Check for user input
+    key = cv.waitKey(1) & 0xFF
+    if key == ESC:
+      cv.destroyAllWindows()
+      break
+  text_boxes += extra_boxes
+  
+  # Interlude: Save bounding boxes of text
   if text_boxes:
     try:
       with open(f'{BOX_FOLDER}/{img_name[:-4]}.pickle', "wb") as f:
@@ -114,7 +161,7 @@ for img_name in sorted(listdir(DIR_NAME)):
     except Exception as ex:
       print(ex)
 
-  # Part 2: OCR + corrections
+  # Part 3: OCR + corrections
   fields = ['Name', 'Party', 'Constituency', 'Date of Birth', 'Education']
   df = pd.DataFrame(columns=fields)
   for box in text_boxes:
@@ -161,7 +208,6 @@ for img_name in sorted(listdir(DIR_NAME)):
     # Append dictionary information to DataFrame
     series = pd.Series(dictionary)
     df = pd.concat([df, series.to_frame().T], ignore_index=True)
-    print(df)
 
   # Dump DataFrame into CSV
   df.to_csv(f'{CSV_FOLDER}/{img_name[:-4]}.csv', index=False)      
