@@ -31,8 +31,8 @@ for img_name in sorted(listdir(DIR_NAME)):
   hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
 
   # Range of HSV values for mask
-  lo = np.asarray([11, 19, 64])
-  hi = np.asarray([105, 66, 255])
+  lo = np.asarray([11, 19, 64]) if 'house' in DIR_NAME else np.asarray([11, 19, 64])
+  hi = np.asarray([105, 66, 255]) if 'house' in DIR_NAME else np.asarray([105, 66, 255])
 
   # Creating window with trackbars to change `lo` and `hi`
   cv.namedWindow('mask')
@@ -79,84 +79,50 @@ for img_name in sorted(listdir(DIR_NAME)):
     if key == ESC:
       cv.destroyAllWindows()
       loop = False
-  
-  """
-  # Part 2: Add extra bounding boxes
-  new_boxes = []
-  def draw_rect():
-    prev = (-1, -1)
-    def inner(event, x, y, flags, param):
-      if event == cv.EVENT_LBUTTONDOWN:
-        if prev == (-1, -1):
-          pass
-        else:
-          prev = x, y
-    return inner
-  loop = True
-  while loop:
-    roi = cv.copyTo(img, maske=img)
 
-    # Show already created bounding boxes
-    for box in text_boxes:
-      roi = cv.rectangle(roi, box, RED, 5)
-
-    # Show added bounding boxes
-    for box in new_boxes:
-      roi = cv.rectangle(roi, box, BLUE, 5)
-
-    cv.imshow('roi', cv.resize(img, (550, 500)))
-    cv.setMouseCallback('roi', draw_rect())
-
-    # Check for user input
-    key = cv.waitKey(1) & 0xFF
-    if key == ESC:
-      cv.destroyAllWindows()
-      loop = False
-  """
-
-  # Part 3: OCR + corrections
-  df = pd.DataFrame(columns=['Name', 'Party', 'Constituency', 'Date of Birth', 'Education'])
+  # Part 2: OCR + corrections
+  fields = ['Name', 'Party', 'Constituency', 'Date of Birth', 'Education']
+  df = pd.DataFrame(columns=fields)
   for box in text_boxes:
     # Get crop of image and send to Pytesseract
     x, y, w, h = box
     crop = img[y:(y + h), x:(x + w)]
     string = pyt.image_to_string(cv.cvtColor(crop, cv.COLOR_BGR2RGB))
 
+    # Sort OCR result into fields
+    filtered_string = filter(lambda s: s, string.split('\n'))
+    text_fields = []
+    for line in filtered_string:
+      if (':' not in line) and all(map(lambda x: x not in line, fields)) and len(text_fields) != 0:
+        text_fields[-1] += ' ' + line
+      else:
+        text_fields.append(line)
+
+    # Extract data from fields
+    dictionary = dict()
+    for line in text_fields:
+      if any(map(lambda x: x in line, fields)):
+        # Most fields will include a colon, sometimes there is a misprint
+        if ':' in line:
+          [key, value] = line.split(':')
+          dictionary[key.strip()] = value.strip()
+        # Extract political party if listed
+        if 'Name' in line:
+          m = re.search('\(.+\)', dictionary['Name'])
+          if m:
+            dictionary['Party'] = m.group()[1:-1]
+            dictionary['Name'] = dictionary['Name'][:(m.start()-1)]
+
     # Show image for corrections
     Image.fromarray(cv.cvtColor(crop, cv.COLOR_BGR2RGB)).show()
 
-    # Some text processing
-    filtered_string = filter(lambda s: s, string.split('\n'))
-
-    # Line-by-line corrections
-    corrected_string = []
-    for line in filtered_string:
-      correction = input(line + '\n')
-      if not correction:
-        # string is correct! :D
-        corrected_string.append(line)
-      elif correction == 'd':
-        # string does not exist, delete
+    # Correct fields and figure out the rest
+    print('Are the following fields correct? If yes, type "y". Otherwise, type the correct string.')
+    for field in fields:
+      user_input = input(f'{field}:{dictionary[field] if field in dictionary.keys() else ''}\n')
+      if user_input == 'y':
         continue
-      else:
-        # string needs to be corrected
-        corrected_string.append(correction)
-    
-    # Turn corrected string into dictionary
-    temp = []
-    for s in corrected_string:
-      # Some fields take multiple lines
-      if ':' in s:
-        temp.append(s)
-      else:
-        temp[-1] += ' ' + s
-    dictionary = {x[0].strip() : x[1].strip() for x in [y.split(':') for y in temp] if x[0] != 'Elected'}
-
-    # Extracting political party if exists
-    m = re.search('\(.+\)', dictionary['Name'])
-    if m:
-      dictionary['Party'] = m.group()[1:-1]
-      dictionary['Name'] = dictionary['Name'][:(m.start()-1)]
+      dictionary[field] = user_input
 
     # Append dictionary information to DataFrame
     series = pd.Series(dictionary)
