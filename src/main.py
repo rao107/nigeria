@@ -1,4 +1,6 @@
-from os import listdir
+from os import listdir, makedirs
+from os.path import exists
+import pickle
 import numpy as np
 import pandas as pd
 import cv2 as cv
@@ -16,6 +18,16 @@ BLUE = (225, 0, 0)
 ENTER = 13
 ESC = 27
 
+# Folder for saving bounding boxes of text
+BOX_FOLDER = 'temp/box'
+if not exists(BOX_FOLDER):
+  makedirs(BOX_FOLDER)
+
+# Folder for saving CSV spreadsheets
+CSV_FOLDER = 'temp/csv'
+if not exists(CSV_FOLDER):
+  makedirs(CSV_FOLDER)
+
 # Directory to go through
 DIR_NAME = './img/house/1983 - 1983/'
 
@@ -25,27 +37,41 @@ def nop(x):
   pass
 
 for img_name in sorted(listdir(DIR_NAME)):
+  # Ask if already segmented image should be used
+  text_boxes = []
+  if exists(f'{BOX_FOLDER}/{img_name[:-4]}.pickle'):
+    user_input = input('Bounding boxes have already been created. Should they be used again? (y/N)\n')
+    if user_input == 'y':
+      try:
+        with open(f'{BOX_FOLDER}/{img_name[:-4]}.pickle', 'rb') as f:
+          text_boxes = pickle.load(f)
+      except Exception as ex:
+        print(ex)
+  
+  # Whether bounding box set up should be done
+  loop = not bool(text_boxes)
 
-  # Grab scan and convert to HSV
+  # Grab scan
   img = cv.imread(DIR_NAME + img_name)
-  hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
 
-  # Range of HSV values for mask
-  lo = np.asarray([11, 19, 64]) if 'house' in DIR_NAME else np.asarray([11, 19, 64])
-  hi = np.asarray([105, 66, 255]) if 'house' in DIR_NAME else np.asarray([105, 66, 255])
+  if loop:
+    # Convert scan to HSV
+    hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
 
-  # Creating window with trackbars to change `lo` and `hi`
-  cv.namedWindow('mask')
-  cv.createTrackbar('H_lo', 'mask', lo[0], 255, nop)
-  cv.createTrackbar('S_lo', 'mask', lo[1], 255, nop)
-  cv.createTrackbar('V_lo', 'mask', lo[2], 255, nop)
-  cv.createTrackbar('H_hi', 'mask', hi[0], 255, nop)
-  cv.createTrackbar('S_hi', 'mask', hi[1], 255, nop)
-  cv.createTrackbar('V_hi', 'mask', hi[2], 255, nop)
+    # Range of HSV values for mask
+    lo = np.asarray([11, 19, 64]) if 'house' in DIR_NAME else np.asarray([11, 19, 64])
+    hi = np.asarray([105, 66, 255]) if 'house' in DIR_NAME else np.asarray([105, 66, 255])
+
+    # Creating window with trackbars to change `lo` and `hi`
+    cv.namedWindow('mask')
+    cv.createTrackbar('H_lo', 'mask', lo[0], 255, nop)
+    cv.createTrackbar('S_lo', 'mask', lo[1], 255, nop)
+    cv.createTrackbar('V_lo', 'mask', lo[2], 255, nop)
+    cv.createTrackbar('H_hi', 'mask', hi[0], 255, nop)
+    cv.createTrackbar('S_hi', 'mask', hi[1], 255, nop)
+    cv.createTrackbar('V_hi', 'mask', hi[2], 255, nop)
 
   # Part 1: Create bounding boxes
-  text_boxes = []
-  loop = True
   while loop:
     # Update `lo` and `hi` based on trackbars
     lo[0] = cv.getTrackbarPos('H_lo', 'mask')
@@ -79,6 +105,14 @@ for img_name in sorted(listdir(DIR_NAME)):
     if key == ESC:
       cv.destroyAllWindows()
       loop = False
+
+  # Save bounding boxes of text
+  if text_boxes:
+    try:
+      with open(f'{BOX_FOLDER}/{img_name[:-4]}.pickle', "wb") as f:
+        pickle.dump(text_boxes, f)
+    except Exception as ex:
+      print(ex)
 
   # Part 2: OCR + corrections
   fields = ['Name', 'Party', 'Constituency', 'Date of Birth', 'Education']
@@ -130,4 +164,4 @@ for img_name in sorted(listdir(DIR_NAME)):
     print(df)
 
   # Dump DataFrame into CSV
-  df.to_csv(f'temp/csv/{img_name[:-4]}.csv', index=False)      
+  df.to_csv(f'{CSV_FOLDER}/{img_name[:-4]}.csv', index=False)      
