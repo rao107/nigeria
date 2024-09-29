@@ -1,5 +1,4 @@
-from os import listdir, makedirs
-from os.path import exists
+import os
 import pickle
 import numpy as np
 import pandas as pd
@@ -20,16 +19,16 @@ ESC = 27
 
 # Folder for saving bounding boxes of text
 BOX_FOLDER = 'temp/box'
-if not exists(BOX_FOLDER):
-  makedirs(BOX_FOLDER)
+if not os.path.exists(BOX_FOLDER):
+  os.makedirs(BOX_FOLDER)
 
 # Folder for saving CSV spreadsheets
-CSV_FOLDER = 'temp/csv'
-if not exists(CSV_FOLDER):
-  makedirs(CSV_FOLDER)
+CSV_FOLDER = 'csv'
+if not os.path.exists(CSV_FOLDER):
+  os.makedirs(CSV_FOLDER)
 
 # Directory to go through
-DIR_NAME = './img/house/1983 - 1983/'
+DIR_NAME = './img/house/1999 - 2003/'
 
 # Flag if scan is house or senate
 IS_HOUSE = 'house' in DIR_NAME
@@ -42,10 +41,16 @@ SCALED_SIZE = (550, 500)  # (x, y)
 def nop(x):
   pass
 
-for img_name in sorted(listdir(DIR_NAME)):
+for img_name in sorted(os.listdir(DIR_NAME)):
+  # Ask if want to redo work
+  if os.path.exists(f'{CSV_FOLDER}/{img_name[:-4]}.csv'):
+    user_input = input(f'Data already extracted for {DIR_NAME+img_name}. Extract again? (y/N)')
+    if user_input != 'y':
+      continue
+
   # Ask if already segmented image should be used
   text_boxes = []
-  if exists(f'{BOX_FOLDER}/{img_name[:-4]}.pickle'):
+  if os.path.exists(f'{BOX_FOLDER}/{img_name[:-4]}.pickle'):
     user_input = input('Bounding boxes have already been created. Should they be used again? (y/N)\n')
     if user_input == 'y':
       try:
@@ -59,15 +64,14 @@ for img_name in sorted(listdir(DIR_NAME)):
 
   # Grab scan
   img = cv.imread(DIR_NAME + img_name)
-  print(len(img), len(img[0]))
 
   if loop:
     # Convert scan to HSV
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
 
     # Range of HSV values for mask
-    lo = np.asarray([11, 21, 64]) if IS_HOUSE else np.asarray([11, 21, 64])
-    hi = np.asarray([105, 66, 255]) if IS_HOUSE else np.asarray([105, 66, 255])
+    lo = np.asarray([11, 19, 64]) if IS_HOUSE else np.asarray([8, 26, 44])
+    hi = np.asarray([99, 66, 255]) if IS_HOUSE else np.asarray([100, 100, 255])
 
     # Creating window with trackbars to change `lo` and `hi`
     cv.namedWindow('mask')
@@ -88,9 +92,8 @@ for img_name in sorted(listdir(DIR_NAME)):
     hi[1] = cv.getTrackbarPos('S_hi', 'mask')
     hi[2] = cv.getTrackbarPos('V_hi', 'mask')
 
-    # Create and show mask in `mask` window
+    # Create mask in `mask` window
     mask = cv.bitwise_not(cv.inRange(hsv, lo, hi))
-    cv.imshow('mask', cv.resize(mask, SCALED_SIZE))
 
     # Find contours using mask
     kernel = cv.getStructuringElement(cv.MORPH_RECT, (5, 5))
@@ -100,12 +103,15 @@ for img_name in sorted(listdir(DIR_NAME)):
     contours = cv.findContours(edges, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)[0]
 
     # Use contours to get bounding boxes of text
-    big_contours = filter(lambda cnt: cv.contourArea(cnt) > 200000, contours)
+    big_contours = filter(lambda cnt: 300000 < cv.contourArea(cnt) and cv.contourArea(cnt) < 1000000, contours)
     text_boxes = [cv.boundingRect(cnt) for cnt in big_contours]
     roi = cv.copyTo(img, mask=img)
     for box in text_boxes:
-      roi = cv.rectangle(roi, box, RED if IS_HOUSE else GREEN, 5, cv.LINE_AA)
+      roi = cv.rectangle(roi, box, RED if IS_HOUSE else GREEN, 5)
+    
+    # Show mask and roi
     cv.imshow('roi', cv.resize(roi, SCALED_SIZE))
+    cv.imshow('mask', cv.resize(mask, SCALED_SIZE))
 
     # Check for user input
     key = cv.waitKey(1) & 0xFF
@@ -137,13 +143,10 @@ for img_name in sorted(listdir(DIR_NAME)):
 
   while loop:
     roi = cv.copyTo(img, mask=img)
-
     for box in text_boxes:
-      roi = cv.rectangle(roi, box, RED if IS_HOUSE else GREEN, 5, cv.LINE_AA)
-
+      roi = cv.rectangle(roi, box, RED if IS_HOUSE else GREEN, 5)
     for box in extra_boxes:
-      roi = cv.rectangle(roi, box, BLUE, 15, cv.LINE_AA)
-
+      roi = cv.rectangle(roi, box, BLUE, 15)
     cv.imshow('roi', cv.resize(roi, SCALED_SIZE))
 
     # Check for user input
@@ -164,7 +167,15 @@ for img_name in sorted(listdir(DIR_NAME)):
   # Part 3: OCR + corrections
   fields = ['Name', 'Party', 'Constituency', 'Date of Birth', 'Education']
   df = pd.DataFrame(columns=fields)
-  for box in text_boxes:
+  # Sort text boxes to add constituency state column easier
+  if len(text_boxes) > 8:
+    temp_boxes = sorted(text_boxes, key=lambda box: box[0])
+    left_boxes = sorted(temp_boxes[:8], key=lambda box: box[1])
+    right_boxes = sorted(temp_boxes[8:], key=lambda box: box[1])
+    sorted_boxes = left_boxes + right_boxes
+  else:
+    sorted_boxes = sorted(text_boxes, key=lambda box: box[1])
+  for box in sorted_boxes:
     # Get crop of image and send to Pytesseract
     x, y, w, h = box
     crop = img[y:(y + h), x:(x + w)]
@@ -185,10 +196,12 @@ for img_name in sorted(listdir(DIR_NAME)):
       if any(map(lambda x: x in line, fields)):
         # Most fields will include a colon, sometimes there is a misprint
         if ':' in line:
-          [key, value] = line.split(':')
-          dictionary[key.strip()] = value.strip()
+          key = line.split(':')[0]
+          value = line.split(':')[1]
+          if key.strip() in fields:
+            dictionary[key.strip()] = value.strip()
         # Extract political party if listed
-        if 'Name' in line:
+        if 'Name' in line and 'Name' in dictionary.keys():
           m = re.search('\(.+\)', dictionary['Name'])
           if m:
             dictionary['Party'] = m.group()[1:-1]
