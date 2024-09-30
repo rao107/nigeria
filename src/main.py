@@ -28,7 +28,7 @@ if not os.path.exists(CSV_FOLDER):
   os.makedirs(CSV_FOLDER)
 
 # Directory to go through
-DIR_NAME = './img/house/1999 - 2003/'
+DIR_NAME = './img/senate/1979 - 1983'
 
 # Flag if scan is house or senate
 IS_HOUSE = 'house' in DIR_NAME
@@ -44,7 +44,7 @@ def nop(x):
 for img_name in sorted(os.listdir(DIR_NAME)):
   # Ask if want to redo work
   if os.path.exists(f'{CSV_FOLDER}/{img_name[:-4]}.csv'):
-    user_input = input(f'Data already extracted for {DIR_NAME+img_name}. Extract again? (y/N)')
+    user_input = input(f'Data already extracted for {DIR_NAME}/{img_name}. Extract again? (y/N)')
     if user_input != 'y':
       continue
 
@@ -63,7 +63,7 @@ for img_name in sorted(os.listdir(DIR_NAME)):
   loop = not bool(text_boxes)
 
   # Grab scan
-  img = cv.imread(DIR_NAME + img_name)
+  img = cv.imread(f'{DIR_NAME}/{img_name}')
 
   if loop:
     # Convert scan to HSV
@@ -224,3 +224,29 @@ for img_name in sorted(os.listdir(DIR_NAME)):
 
   # Dump DataFrame into CSV
   df.to_csv(f'{CSV_FOLDER}/{img_name[:-4]}.csv', index=False)      
+
+# Aggregate all politicians in term
+df = pd.DataFrame(columns=['Name', 'Party', 'Constituency', 'Date of Birth', 'Education'])
+for img_name in sorted(os.listdir(DIR_NAME)):
+  temp = pd.read_csv(f'{CSV_FOLDER}/{img_name[:-4]}.csv')
+  df = pd.concat([df, temp], ignore_index=True)
+
+# Create list of states politicians represent
+state_list = []
+for img_name in sorted(os.listdir(DIR_NAME)):
+  Image.open(f'{DIR_NAME}/{img_name}').show()
+  current_index = 0
+  while current_index < 16:
+    current_state = input('What is the state?\n')
+    num_pol = input('How many politicians are in this state?\n')
+    num_pol = int(num_pol) # if i mess this part up i s2g
+    if num_pol == -1:
+      break
+    state_list += [current_state] * num_pol
+    current_index += num_pol
+
+# Add State field to aggregation
+df = df.assign(State=pd.Series(state_list).values)
+
+# Dump aggregation into new CSV
+df.to_csv(f'{CSV_FOLDER}/{DIR_NAME[2:].replace('/', '_')}.csv', index=False)
