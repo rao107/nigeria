@@ -19,16 +19,20 @@ ESC = 27
 
 # Folder for saving bounding boxes of text
 BOX_FOLDER = 'temp/box'
-if not os.path.exists(BOX_FOLDER):
-  os.makedirs(BOX_FOLDER)
 
 # Folder for saving CSV spreadsheets
 CSV_FOLDER = 'csv'
-if not os.path.exists(CSV_FOLDER):
-  os.makedirs(CSV_FOLDER)
+
+# Folder for saving aggregations
+FINAL_FOLDER = f'{CSV_FOLDER}/assemblies'
+
+# Create folders if necessary
+for folder in [BOX_FOLDER, CSV_FOLDER, FINAL_FOLDER]:
+  if not os.path.exists(folder):
+    os.makedirs(folder)
 
 # Directory to go through
-DIR_NAME = './img/senate/1979 - 1983'
+DIR_NAME = './img/senate/1999 - 2003'
 
 # Flag if scan is house or senate
 IS_HOUSE = 'house' in DIR_NAME
@@ -249,4 +253,4 @@ for img_name in sorted(os.listdir(DIR_NAME)):
 df = df.assign(State=pd.Series(state_list).values)
 
 # Dump aggregation into new CSV
-df.to_csv(f'{CSV_FOLDER}/{DIR_NAME[2:].replace('/', '_')}.csv', index=False)
+df.to_csv(f'{FINAL_FOLDER}/{DIR_NAME[2:].replace('/', '_')}.csv', index=False)
