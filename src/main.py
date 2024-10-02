@@ -32,7 +32,7 @@ for folder in [BOX_FOLDER, CSV_FOLDER, FINAL_FOLDER]:
     os.makedirs(folder)
 
 # Directory to go through
-DIR_NAME = './img/senate/2003 - 2007'
+DIR_NAME = './img/house/1999 - 2003'
 
 # Flag if scan is house or senate
 IS_HOUSE = 'house' in DIR_NAME
