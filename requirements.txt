@@ -3,3 +3,4 @@ opencv-python
 pandas
 pillow
 pytesseract
+bs4
